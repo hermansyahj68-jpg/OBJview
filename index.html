@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css?v=1.0">
+    
+     <!-- ICON -->
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#121212">
+
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>OBJ Viewer Simple</title>
+
+<style>
+body{
+margin:0;
+overflow:hidden;
+background:#ffffff;
+font-family:sans-serif;
+}
+
+/* PANEL UI */
+#ui{
+position:absolute;
+top:10px;
+left:10px;
+z-index:10;
+background:rgba(0,0,0,0.75);
+padding:8px;
+border-radius:8px;
+color:white;
+border:1px solid #444;
+}
+
+/* ROW BUTTON */
+.btn-row{
+display:flex;
+gap:6px;
+}
+
+/* BUTTON MINI */
+.btn-row button{
+flex:1;
+padding:6px;
+font-size:12px;
+border:none;
+border-radius:4px;
+background:#007bff;
+color:white;
+cursor:pointer;
+}
+
+button.active{
+background:#28a745;
+}
+
+.status{
+font-size:11px;
+margin-top:5px;
+color:#aaa;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+    <div class="btn-row">
+        <button id="btnLoad">📁</button>
+        <button id="toggleWireframe">📐</button>
+        <button id="isoView">🎥</button>
+    </div>
+
+    <div id="status" class="status">Menunggu file...</div>
+
+    <input type="file" id="fileInput" multiple accept=".obj,.mtl,.png,.jpg,.jpeg" hidden>
+</div>
+
+<script type="importmap">
+{
+"imports":{
+"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+"three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"
+}
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import {OBJLoader} from "three/addons/loaders/OBJLoader.js";
+import {MTLLoader} from "three/addons/loaders/MTLLoader.js";
+import {OrbitControls} from "three/addons/controls/OrbitControls.js";
+
+let scene=new THREE.Scene();
+scene.background=new THREE.Color(0xffffff);
+
+let camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+
+let renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+let ambient=new THREE.AmbientLight(0xffffff,1.2);
+scene.add(ambient);
+
+let dir=new THREE.DirectionalLight(0xffffff,1.5);
+dir.position.set(5,10,7);
+scene.add(dir);
+
+let controls=new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
+
+camera.position.set(0,2,5);
+
+let currentModel=null;
+let isWireframe=false;
+
+const loaderOBJ=new OBJLoader();
+const loaderMTL=new MTLLoader();
+
+/* UI */
+const btnLoad=document.getElementById("btnLoad");
+const fileInput=document.getElementById("fileInput");
+const statusText=document.getElementById("status");
+const wireBtn=document.getElementById("toggleWireframe");
+const isoBtn=document.getElementById("isoView");
+
+/* TOOLTIP */
+btnLoad.title="Load Model";
+wireBtn.title="Wireframe";
+isoBtn.title="Isometric";
+
+/* LOAD FILE */
+btnLoad.onclick=()=>fileInput.click();
+
+fileInput.addEventListener("change",function(e){
+
+const files=e.target.files;
+let objFile=null;
+let mtlFile=null;
+let textures={};
+
+for(let f of files){
+let name=f.name.toLowerCase();
+
+if(name.endsWith(".obj")) objFile=f;
+if(name.endsWith(".mtl")) mtlFile=f;
+
+if(name.endsWith(".png")||name.endsWith(".jpg")||name.endsWith(".jpeg")){
+textures[f.name]=URL.createObjectURL(f);
+}
+}
+
+if(!objFile){
+statusText.innerText="OBJ tidak ditemukan";
+return;
+}
+
+statusText.innerText="Memuat...";
+
+const reader=new FileReader();
+
+reader.onload=function(ev){
+const objData=ev.target.result;
+
+if(currentModel) scene.remove(currentModel);
+
+if(mtlFile){
+const mtlReader=new FileReader();
+
+mtlReader.onload=function(m){
+let text=m.target.result;
+
+for(let tex in textures){
+text=text.replaceAll(tex,textures[tex]);
+}
+
+const materials=loaderMTL.parse(text);
+materials.preload();
+loaderOBJ.setMaterials(materials);
+
+const object=loaderOBJ.parse(objData);
+tampilkanModel(object);
+};
+
+mtlReader.readAsText(mtlFile);
+
+}else{
+const object=loaderOBJ.parse(objData);
+tampilkanModel(object);
+}
+};
+
+reader.readAsText(objFile);
+});
+
+/* TAMPILKAN MODEL */
+function tampilkanModel(object){
+
+const box=new THREE.Box3().setFromObject(object);
+const size=box.getSize(new THREE.Vector3());
+const center=box.getCenter(new THREE.Vector3());
+
+object.position.sub(center);
+
+const maxDim=Math.max(size.x,size.y,size.z);
+const fov=camera.fov*(Math.PI/180);
+let camZ=Math.abs(maxDim/2/Math.tan(fov/2));
+camZ*=1.6;
+
+camera.position.set(camZ/2,camZ/2,camZ);
+
+controls.target.set(0,0,0);
+controls.update();
+
+scene.add(object);
+currentModel=object;
+
+statusText.innerText="Model OK";
+
+wireBtn.disabled=false;
+isoBtn.disabled=false;
+}
+
+/* WIREFRAME */
+wireBtn.onclick=function(){
+
+if(!currentModel)return;
+
+isWireframe=!isWireframe;
+
+currentModel.traverse(child=>{
+if(child.isMesh){
+if(Array.isArray(child.material)){
+child.material.forEach(m=>m.wireframe=isWireframe);
+}else{
+child.material.wireframe=isWireframe;
+}
+}
+});
+
+wireBtn.classList.toggle("active");
+};
+
+/* ISOMETRIC */
+isoBtn.onclick=function(){
+
+if(!currentModel)return;
+
+const box=new THREE.Box3().setFromObject(currentModel);
+const size=box.getSize(new THREE.Vector3());
+const maxDim=Math.max(size.x,size.y,size.z);
+
+const distance=maxDim*1.5;
+
+camera.position.set(distance,distance*0.7,distance);
+
+controls.target.set(0,0,0);
+controls.update();
+};
+
+/* RENDER */
+function animate(){
+requestAnimationFrame(animate);
+controls.update();
+renderer.render(scene,camera);
+}
+animate();
+
+/* RESIZE */
+window.addEventListener("resize",()=>{
+camera.aspect=window.innerWidth/window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js')
+  .then(function(reg){
+    console.log("Service Worker aktif", reg);
+  }).catch(function(err){
+    console.log("Service Worker gagal", err);
+  });
+        }
+</script>
+
+</body>
+</html>
